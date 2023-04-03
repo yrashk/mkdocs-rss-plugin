@@ -49,6 +49,7 @@ class GitRssPlugin(BasePlugin):
         ("abstract_chars_count", config_options.Type(int, default=160)),
         ("abstract_delimiter", config_options.Type(str, default="<!-- more -->")),
         ("categories", config_options.Type(list, default=None)),
+        ("enabled_categories", config_options.Type(list, default=None))
         ("comments_path", config_options.Type(str, default=None)),
         ("date_from_meta", config_options.Type(dict, default=None)),
         ("enabled", config_options.Type(bool, default=True)),
@@ -58,6 +59,7 @@ class GitRssPlugin(BasePlugin):
         ("match_path", config_options.Type(str, default=".*")),
         ("pretty_print", config_options.Type(bool, default=False)),
         ("url_parameters", config_options.Type(dict, default=None)),
+        ("rss_dir", config_options.Type(string, default=None))
     )
 
     def __init__(self):
@@ -74,6 +76,7 @@ class GitRssPlugin(BasePlugin):
         # prepare output feeds
         self.feed_created = dict
         self.feed_updated = dict
+        self.enabled_categories = None
 
     def on_config(self, config: config_options.Config) -> dict:
         """The config event is the first event called on build and
@@ -122,6 +125,10 @@ class GitRssPlugin(BasePlugin):
 
         # pattern to match pages included in output
         self.match_path_pattern = compile(self.config.get("match_path"))
+
+        # categories to include
+        if self.config.get("enabled_categories") is not None:
+            self.enabled_categories = self.config.get("enabled_categories")
 
         # date handling
         if self.config.get("date_from_meta") is not None:
@@ -218,6 +225,14 @@ class GitRssPlugin(BasePlugin):
             logger.debug(f"Page {page.title} ignored because it's a draft")
             return
 
+        categories = self.util.get_categories_from_meta(
+                    in_page=page, categories_labels=self.config.get("categories")
+                )
+
+        # skip pages with disabled categories
+        if self.enabled_categories is not None and set(self.enabled_categories).isdisjoint(categories):
+            return
+
         # retrieve dates from git log
         page_dates = self.util.get_file_dates(
             in_page=page,
@@ -252,9 +267,7 @@ class GitRssPlugin(BasePlugin):
             PageInformation(
                 abs_path=Path(page.file.abs_src_path),
                 authors=self.util.get_authors_from_meta(in_page=page),
-                categories=self.util.get_categories_from_meta(
-                    in_page=page, categories_labels=self.config.get("categories")
-                ),
+                categories=categories,
                 created=page_dates[0],
                 description=self.util.get_description_or_abstract(
                     in_page=page,
@@ -291,8 +304,10 @@ class GitRssPlugin(BasePlugin):
         pretty_print = self.config.get("pretty_print", False)
 
         # output filepaths
-        out_feed_created = Path(config.get("site_dir")) / OUTPUT_FEED_CREATED
-        out_feed_updated = Path(config.get("site_dir")) / OUTPUT_FEED_UPDATED
+        rss_dir = self.config.get("rss_dir") or config.get("site_dir")
+
+        out_feed_created = Path(rss_dir) / OUTPUT_FEED_CREATED
+        out_feed_updated = Path(rss_dir) / OUTPUT_FEED_UPDATED
 
         # created items
         self.feed_created.get("entries").extend(
